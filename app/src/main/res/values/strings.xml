@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Test1</string>
+    <string name="point_your_phone_down">Please point your phone down at a flat surface</string>
+    <string name="tap_anywhere_to_add_model">Tap anywhere to add models</string>
+</resources>
