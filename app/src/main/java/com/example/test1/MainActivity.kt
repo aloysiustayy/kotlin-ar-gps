@@ -2,13 +2,15 @@ package com.example.test1
 
 import android.Manifest
 import android.content.ContentValues
+import android.content.Context
 import android.content.pm.PackageManager
+import android.hardware.SensorManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -17,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -61,6 +64,7 @@ import io.github.sceneview.ar.node.AnchorNode
 import io.github.sceneview.ar.rememberARCameraNode
 import io.github.sceneview.loaders.MaterialLoader
 import io.github.sceneview.loaders.ModelLoader
+import io.github.sceneview.math.Rotation
 import io.github.sceneview.model.ModelInstance
 import io.github.sceneview.node.CubeNode
 import io.github.sceneview.node.ModelNode
@@ -73,19 +77,32 @@ import io.github.sceneview.rememberOnGestureListener
 import io.github.sceneview.rememberView
 import java.util.concurrent.TimeUnit
 
-private const val kModelFile = "models/relaxaurus_palworld_model_3d_free.glb"
+private const val kModelFile = "models/direction_arrow.glb"
 private const val kMaxModelInstances = 10
 lateinit var session: Session
+private lateinit var sensors: Sensors
 private const val FINE_LOCATION_REQUEST_CODE = 1001
 private lateinit var fusedLocationClient: FusedLocationProviderClient
-class MainActivity : ComponentActivity() {
+
+data class Waypoint(
+    var latitude: Double,
+    val longitude: Double,
+    val altitude: Double
+)
+class MainActivity : AppCompatActivity() {
+    private val deviceBearing = mutableStateOf(0.0)
     private val cur_latitude = mutableStateOf(0.0)
     private val cur_longitude = mutableStateOf(0.0)
     private val cur_altitude = mutableStateOf(0.0)
-
-
+    var hasInstantiated = mutableStateOf(false)
+    private var allWaypoints = mutableListOf<Waypoint>()
+    private var bearing = mutableStateOf(0.0)
+    private lateinit var wifiManager: WiFiManager
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        sensors = Sensors(sensorManager, deviceBearing)
+        wifiManager = WiFiManager(this)
         setContent {
             Test1Theme {
                 // A surface container using the 'background' color from the theme
@@ -94,8 +111,12 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
 
-
-
+                    if(allWaypoints.size == 0){
+                        var tempWaypoint1: Waypoint = Waypoint(1.433279, 103.7875715, 50.9)
+                        var tempWaypoint2: Waypoint = Waypoint(1.433287, 103.7875579, 50.9)
+                        allWaypoints.add(tempWaypoint1)
+                        allWaypoints.add(tempWaypoint2)
+                    }
                     // Check if ARCore is supported and up-to-date
                     if (isARCoreSupportedAndUpToDate()) {
                         // Request the ACCESS_FINE_LOCATION permission if not granted
@@ -146,6 +167,7 @@ class MainActivity : ComponentActivity() {
                                 onSessionUpdated = { session, updatedFrame ->
                                     frame = updatedFrame
 
+
                                     if (childNodes.isEmpty()) {
                                         updatedFrame.getUpdatedPlanes()
                                             .firstOrNull { it.type == Plane.Type.HORIZONTAL_UPWARD_FACING }
@@ -156,10 +178,30 @@ class MainActivity : ComponentActivity() {
                                                     modelLoader = modelLoader,
                                                     materialLoader = materialLoader,
                                                     modelInstances = modelInstances,
-                                                    anchor = anchor
+                                                    anchor = anchor,
+                                                    rotationDegrees = 0.0f
                                                 )
                                             }
                                     }
+
+//                                    if(bearing.value != 0.0){
+//
+//                                        updatedFrame.getUpdatedPlanes()
+//                                            .firstOrNull { it.type == Plane.Type.HORIZONTAL_UPWARD_FACING }
+//                                            ?.let { it.createAnchorOrNull(it.centerPose) }
+//                                            ?.let { anchor ->
+//                                                childNodes += createAnchorNode(
+//                                                    engine = engine,
+//                                                    modelLoader = modelLoader,
+//                                                    materialLoader = materialLoader,
+//                                                    modelInstances = modelInstances,
+//                                                    anchor = anchor,
+//                                                    rotationDegrees = bearing.value.toFloat()
+//                                                )
+//                                            }
+//
+//
+//                                    }
                                 },
                                 onGestureListener = rememberOnGestureListener(
                                     onSingleTapConfirmed = { motionEvent, node ->
@@ -179,7 +221,8 @@ class MainActivity : ComponentActivity() {
                                                         modelLoader = modelLoader,
                                                         materialLoader = materialLoader,
                                                         modelInstances = modelInstances,
-                                                        anchor = anchor
+                                                        anchor = anchor,
+                                                        rotationDegrees = bearing.value.toFloat()
                                                     )
                                                 }
                                         }
@@ -204,7 +247,7 @@ class MainActivity : ComponentActivity() {
 
                             Log.d("Child Nodes Count", childNodes.size.toString())
                             var index = 0
-                            for(i in childNodes){
+                            for (i in childNodes) {
                                 Log.d("Child Node Index", (index++).toString())
                                 Log.d("Child Nodes XYZ", i.worldPosition.xyz.toString())
                             }
@@ -213,22 +256,55 @@ class MainActivity : ComponentActivity() {
                             // Permission not granted, request it
                             requestFineLocationPermission()
                         }
-
-
                     }
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.BottomCenter // Align content to the bottom center
                     ) {
                         Column(
-                            modifier = Modifier.padding(bottom = 16.dp) // Add padding to the bottom
-                        ) {
-                            Spacer(modifier = Modifier.height(16.dp)) // Add space above the Column
 
-                            Text("Lat: ${cur_latitude.value.toString()}")
-                            Text("Long: ${cur_longitude.value.toString()}")
-                            Text("Altitude: ${cur_altitude.value.toDouble().toString()}")
+//                        contentAlignment = Alignment.BottomCenter // Align content to the bottom center
+                        ) {
+//                        val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+                            Box(
+
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(bottom = 16.dp) // Add padding to the bottom
+                                ) {
+                                    Spacer(modifier = Modifier.height(16.dp)) // Add space above the Column
+
+
+                                    if(allWaypoints.size > 0) {
+                                        Text("Lat: ${allWaypoints[allWaypoints.size - 1].latitude.toString()}")
+                                        Text("Long: ${allWaypoints[allWaypoints.size - 1].longitude.toString()}")
+                                        Text(
+                                            "Altitude: ${
+                                                allWaypoints[allWaypoints.size - 1].altitude.toString()
+                                            }"
+                                        )
+                                        if(allWaypoints.size > 1) {
+                                            calculateAngleToTrueNorth(
+                                                allWaypoints[allWaypoints.size - 2].latitude,
+                                                allWaypoints[allWaypoints.size - 2].longitude,
+                                                allWaypoints[allWaypoints.size - 1].latitude,
+                                                allWaypoints[allWaypoints.size - 1].longitude
+                                            )
+                                            Text("Bearingg: ${bearing.value}")
+                                        }
+                                    }
+                                }
+                            }
+//                            Text(text = "Device: ${deviceBearing.value.toString()}")
+                            Button(
+                                onClick = {
+                                    Log.d("Location", "Fetching location!")
+                                    updateText()
+                                },
+                                content = { Text("Get Location") }
+                            )
                         }
+
                     }
                 }
             }
@@ -238,9 +314,37 @@ class MainActivity : ComponentActivity() {
 
         // Request location updates
         requestLocationUpdates()
+        Log.d("WiFi", "performing scan!")
+        performWiFiScan()
+    }
+    fun calculateAngleToTrueNorth(latA: Double, lonA: Double, latB: Double, lonB: Double): Double {
+        // Calculate initial bearing from classroom A to classroom B
+        val bearingAB = calculateBearing(latA, lonA, latB, lonB)
 
+        // Adjust for magnetic declination (+0.05° for Singapore)
+        val declination = 0.05 // Singapore's declination value
+        val angleToTrueNorth = (bearingAB + declination) % 360.0
+        bearing.value = angleToTrueNorth
+        return angleToTrueNorth
     }
 
+    fun calculateBearing(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val dLon = Math.toRadians(lon2 - lon1)
+        val y = Math.sin(dLon) * Math.cos(Math.toRadians(lat2))
+        val x = Math.cos(Math.toRadians(lat1)) * Math.sin(Math.toRadians(lat2)) -
+                Math.sin(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) * Math.cos(dLon)
+        var bearing = Math.toDegrees(Math.atan2(y, x))
+        bearing = (bearing + 360) % 360
+        return bearing
+    }
+    private fun updateText(){
+        var tempWaypoint: Waypoint = Waypoint(cur_latitude.value, cur_longitude.value, cur_altitude.value)
+
+//        allWaypoints.add(tempWaypoint)
+        Log.d("GPS", allWaypoints.size.toString())
+        Log.d("GPS", allWaypoints[allWaypoints.size-1].toString())
+
+    }
     // Function to check if ACCESS_FINE_LOCATION permission is granted
     private fun hasFineLocationPermission(): Boolean {
         return ActivityCompat.checkSelfPermission(
@@ -275,6 +379,16 @@ class MainActivity : ComponentActivity() {
                 Log.e("Location", "Fine location permission denied.")
             }
         }
+        if (requestCode == REQUEST_FINE_LOCATION_PERMISSION) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                // Permission granted, perform WiFi scan
+//                Log.d("WiFi", "performing scan!")
+                performWiFiScan()
+            } else {
+                // Permission denied, handle accordingly
+                // You may display a message to the user indicating why the permission is required
+            }
+        }
     }
     override fun onDestroy() {
         super.onDestroy()
@@ -297,10 +411,35 @@ class MainActivity : ComponentActivity() {
             Log.d("Geospatial", "Geospatial enabled.")
         }
 
+        // Check whether the user's device supports the Depth API.
+        val isDepthSupported = session.isDepthModeSupported(Config.DepthMode.AUTOMATIC)
+        if (isDepthSupported) {
+            config.depthMode = Config.DepthMode.AUTOMATIC
+        }
         // Configure the session.
         session.configure(config)
     }
 
+    private fun performWiFiScan() {
+        // Example usage: scan WiFi networks
+        val scanResults = wifiManager.scanWifiNetworks()
+        for (scanResult in scanResults) {
+            // Check if the SSID matches the current Wi-Fi connection SSID
+
+
+            // Retrieve and log only the SSID
+            val level = scanResult.level
+            val ssid = scanResult.SSID
+            Log.d("WiFiManagerTest", scanResult.toString())
+
+        }
+
+
+    }
+
+    companion object {
+        private const val REQUEST_FINE_LOCATION_PERMISSION = 123
+    }
     private fun requestLocationUpdates() {
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             Log.e("Location", "Location permission not granted")
@@ -309,11 +448,11 @@ class MainActivity : ComponentActivity() {
 
 
         fun createLocationRequest() = LocationRequest.Builder(
-            Priority.PRIORITY_HIGH_ACCURACY, TimeUnit.MINUTES.toMillis(5)
+            Priority.PRIORITY_HIGH_ACCURACY, TimeUnit.MINUTES.toMillis(2)
         ).apply {
             setGranularity(Granularity.GRANULARITY_PERMISSION_LEVEL)
 //            setDurationMillis(TimeUnit.MINUTES.toMillis(5))
-            setIntervalMillis(500)
+            setIntervalMillis(200)
             setWaitForAccurateLocation(true)
             setMaxUpdates(Integer.MAX_VALUE)
         }.build()
@@ -325,6 +464,8 @@ class MainActivity : ComponentActivity() {
             locationCallback,
             null
         )
+
+
     }
 
     private val locationCallback = object : LocationCallback() {
@@ -389,7 +530,8 @@ class MainActivity : ComponentActivity() {
         modelLoader: ModelLoader,
         materialLoader: MaterialLoader,
         modelInstances: MutableList<ModelInstance>,
-        anchor: Anchor
+        anchor: Anchor,
+        rotationDegrees: Float
     ): AnchorNode {
         val anchorNode = AnchorNode(engine = engine, anchor = anchor)
         val modelNode = ModelNode(
@@ -403,6 +545,7 @@ class MainActivity : ComponentActivity() {
         ).apply {
             // Model Node needs to be editable for independent rotation from the anchor rotation
             isEditable = true
+            rotation = Rotation(0.0f, rotationDegrees, 0.0f)
         }
         val boundingBoxNode = CubeNode(
             engine,
@@ -414,6 +557,8 @@ class MainActivity : ComponentActivity() {
         }
         modelNode.addChildNode(boundingBoxNode)
         anchorNode.addChildNode(modelNode)
+
+
 
         listOf(modelNode, anchorNode).forEach {
             it.onEditingChanged = { editingTransforms ->
